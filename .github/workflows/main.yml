@@ -1,0 +1,131 @@
+name: Build OpenWrt
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    name: Build OpenWrt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt -yqq purge firefox
+          sudo -E apt -yqq update
+          sudo -E apt -yqq full-upgrade
+          sudo -E apt -yqq autoremove --purge
+          sudo -E apt -yqq autoclean
+          sudo -E apt -yqq clean
+          sudo -E apt -yqq install dos2unix libfuse-dev
+          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          sudo -E systemctl daemon-reload
+          sudo -E timedatectl set-timezone "Asia/Shanghai"
+
+          sudo mkdir -p /mnt/build_openwrt
+          sudo chown $USER:$USER /mnt/build_openwrt
+          sudo ln -s /mnt/build_openwrt $GITHUB_WORKSPACE/openwrt
+
+      - name: Clone Code
+        run: |
+          git clone --depth=1 --single-branch --branch 25.12 https://github.com/chasey-dev/immortalwrt-mt798x-rebase.git ./openwrt/
+          cd ./openwrt/ && echo "OpenWrt_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+
+      - name: Check Caches
+        id: check-cache
+        uses: actions/cache@v6
+        with:
+          key: OpenWrt-${{ env.OpenWrt_HASH }}
+          restore-keys: OpenWrt-
+          path: |
+            ./openwrt/.ccache
+            ./openwrt/staging_dir/host*
+            ./openwrt/staging_dir/tool*
+
+      - name: Update Caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -d "./openwrt/staging_dir" ]; then
+            find "./openwrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+              find "$DIR" -type f -exec touch {} +
+            done
+
+            mkdir -p ./openwrt/tmp && echo "1" > ./openwrt/tmp/.build
+
+            echo "toolchain skipped done!"
+          else
+            echo "caches missed!"
+          fi
+
+          if [ "${{ steps.check-cache.outputs.cache-hit }}" != "true" ]; then
+            CACHE_IDS=$(gh cache list --key "OpenWrt-" --limit 100 --json id --jq '.[].id')
+            for CACHE_ID in $CACHE_IDS; do
+              gh cache delete "$CACHE_ID"
+            done
+
+            echo "caches cleanup done!"
+          fi
+
+      - name: Update Feeds
+        run: |
+          cd ./openwrt/
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Replace Argon-theme
+        run: |
+          cd ./openwrt/
+          rm -rf feeds/luci/themes/luci-theme-argon
+          rm -rf feeds/luci/applications/luci-app-argon-config
+          mkdir -p package/argon
+          cd package/argon
+          git clone https://github.com/jerrykuku/luci-theme-argon.git --depth=1 --single-branch --branch master
+          git clone https://github.com/jerrykuku/luci-app-argon-config.git --depth=1 --single-branch --branch master
+
+      - name: Compile Firmware
+        run: |
+          cd ./openwrt/
+          cat "$GITHUB_WORKSPACE/360T7.config" >> .config
+          make defconfig -j$(nproc)
+          make download -j$(nproc)
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Package Firmware
+        run: |
+          cd ./openwrt/ && mkdir -p ./upload/
+          cp -f ./.config ./upload/config-"$OpenWrt_HASH".txt
+          OpenWrt_KVER=$(find ./bin/targets/ -type f -name '*.manifest' -exec grep -hoP '^kernel - \K[\d.]+' {} + | sort -u | head -n 1)
+          echo "OpenWrt_KVER=$OpenWrt_KVER" >> "$GITHUB_ENV"
+          echo "OpenWrt_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
+          find ./bin/targets/ -iregex ".*\(buildinfo\|json\|packages\)$" -exec rm -rf {} +
+          find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
+          make clean -j$(nproc)
+
+      - name: Release Firmware
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{env.OpenWrt_HASH}}
+          files: ./openwrt/upload/*
+          body: |
+            提交：${{env.OpenWrt_HASH}}
+            内核版本：${{env.OpenWrt_KVER}}
+            插件列表：${{env.OpenWrt_LIST}}
+
+      - name: Delete old Releases and Workflows
+        uses: ophub/delete-releases-workflows@main
+        with:
+          gh_token: ${{secrets.GITHUB_TOKEN}}
+          delete_releases: true
+          releases_keep_latest: 3
+          delete_tags: true
+          delete_workflows: true
+          workflows_keep_day: 30
