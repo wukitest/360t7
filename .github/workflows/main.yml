@@ -94,7 +94,10 @@ jobs:
       - name: Compile Firmware
         run: |
           cd ./openwrt/
-          cat "$GITHUB_WORKSPACE/360T7.config" >> .config
+          awk '!/^CONFIG_TARGET_DEVICE_(PACKAGES_)?mediatek_filogic_DEVICE_/ && !/^# CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_.* is not set$/' \
+            defconfig/mt7981-ax3000.config > .config.base
+          ./scripts/kconfig.pl '+' .config.base "$GITHUB_WORKSPACE/360T7.config" > .config
+          rm .config.base
           make defconfig -j$(nproc)
           make download -j$(nproc)
           make -j$(nproc) || make -j1 V=s
