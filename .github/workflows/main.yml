@@ -81,15 +81,18 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Replace Argon-theme
+      - name: Add packages
         run: |
           cd ./openwrt/
           rm -rf feeds/luci/themes/luci-theme-argon
           rm -rf feeds/luci/applications/luci-app-argon-config
-          mkdir -p package/argon
-          cd package/argon
-          git clone https://github.com/jerrykuku/luci-theme-argon.git --depth=1 --single-branch --branch master
-          git clone https://github.com/jerrykuku/luci-app-argon-config.git --depth=1 --single-branch --branch master
+          git clone --depth 1 --single-branch --branch master https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
+          git clone --depth 1 --single-branch --branch master https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
+          git clone --depth 1 --single-branch --branch main https://github.com/nikkinikki-org/OpenWrt-nikki.git package/nikki
+          git clone --depth 1 --single-branch --branch master https://github.com/muink/openwrt-natmapt.git package/openwrt-natmapt
+          git clone --depth 1 --single-branch --branch master https://github.com/muink/openwrt-stuntman.git package/openwrt-stuntman
+          git clone --depth 1 --single-branch --branch master https://github.com/muink/luci-app-natmapt.git package/luci-app-natmapt
+
 
       - name: Compile Firmware
         run: |
