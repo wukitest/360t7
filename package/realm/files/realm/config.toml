@@ -1,0 +1,6 @@
+# Realm configuration file.
+# Add one or more endpoints, then set realm.config.enabled to '1'.
+#
+# [[endpoints]]
+# listen = "0.0.0.0:5000"
+# remote = "example.com:443"
